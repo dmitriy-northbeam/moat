@@ -100,6 +100,12 @@ type Run struct {
 	// awsTempDir is the temp directory for AWS credential helper (cleaned up on destroy)
 	awsTempDir string
 
+	// GCP credential provider (set when using gcp grant)
+	GCPCredentialProvider *proxy.GCPCredentialProvider
+
+	// gcpTempDir is the temp directory for GCP credential helper (cleaned up on destroy)
+	gcpTempDir string
+
 	// ClaudeConfigTempDir is the temporary directory containing Claude configuration files
 	// (settings.json, .mcp.json) that are mounted into the container. This should be
 	// cleaned up when the run is stopped or destroyed.

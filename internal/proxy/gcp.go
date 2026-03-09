@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -54,13 +53,14 @@ func (h *GCPCredentialHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	expiresIn := int64(math.Max(0, time.Until(creds.Expiration).Seconds()))
-
+	// GCP executable-sourced credential output format.
+	// See: https://google.aip.dev/auth/4117
 	resp := map[string]interface{}{
-		"access_token": creds.Token,
-		"token_type":   "Bearer",
-		"expires_in":   expiresIn,
-		"expiry":       creds.Expiration.Format(time.RFC3339),
+		"version":         1,
+		"success":         true,
+		"token_type":      "urn:ietf:params:oauth:token-type:access_token",
+		"access_token":    creds.Token,
+		"expiration_time": creds.Expiration.Unix(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

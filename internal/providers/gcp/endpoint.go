@@ -95,16 +95,14 @@ func (h *EndpointHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresIn := int(time.Until(token.Expiration).Seconds())
-	if expiresIn < 0 {
-		expiresIn = 0
-	}
-
+	// GCP executable-sourced credential output format.
+	// See: https://google.aip.dev/auth/4117
 	resp := map[string]interface{}{
-		"access_token": token.Token,
-		"token_type":   "Bearer",
-		"expires_in":   expiresIn,
-		"expiry":       token.Expiration.Format(time.RFC3339),
+		"version":         1,
+		"success":         true,
+		"token_type":      "urn:ietf:params:oauth:token-type:access_token",
+		"access_token":    token.Token,
+		"expiration_time": token.Expiration.Unix(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

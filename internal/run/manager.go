@@ -897,6 +897,8 @@ region = %s
 			// Set environment variables
 			proxyEnv = append(proxyEnv,
 				"GOOGLE_APPLICATION_CREDENTIALS=/agentops/gcp/credentials.json",
+				// Required for GCP SDK to allow executable-sourced credentials.
+				"GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1",
 				"AGENTOPS_GCP_CREDENTIAL_URL="+gcpCredentialURL,
 				// GCP traffic goes through proxy for firewall/observability.
 				// Tell common HTTP libraries to trust our CA for MITM SSL.

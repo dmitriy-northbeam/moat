@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func TestParseServiceAccount(t *testing.T) {
 					t.Errorf("ParseServiceAccount(%q) = nil error, want error containing %q", tt.email, tt.errMsg)
 					return
 				}
-				if tt.errMsg != "" && !containsString(err.Error(), tt.errMsg) {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("ParseServiceAccount(%q) error = %q, want error containing %q", tt.email, err.Error(), tt.errMsg)
 				}
 				return
@@ -229,14 +230,17 @@ func TestEndpointHandler_ServeHTTP(t *testing.T) {
 		if resp["access_token"] != "ya29.test-access-token" {
 			t.Errorf("access_token = %v, want ya29.test-access-token", resp["access_token"])
 		}
-		if resp["token_type"] != "Bearer" {
-			t.Errorf("token_type = %v, want Bearer", resp["token_type"])
+		if resp["version"] != float64(1) {
+			t.Errorf("version = %v, want 1", resp["version"])
 		}
-		if _, ok := resp["expires_in"]; !ok {
-			t.Error("expires_in missing from response")
+		if resp["success"] != true {
+			t.Errorf("success = %v, want true", resp["success"])
 		}
-		if _, ok := resp["expiry"]; !ok {
-			t.Error("expiry missing from response")
+		if resp["token_type"] != "urn:ietf:params:oauth:token-type:access_token" {
+			t.Errorf("token_type = %v, want urn:ietf:params:oauth:token-type:access_token", resp["token_type"])
+		}
+		if _, ok := resp["expiration_time"]; !ok {
+			t.Error("expiration_time missing from response")
 		}
 	})
 
@@ -452,14 +456,4 @@ type mockIAMClient struct {
 
 func (m *mockIAMClient) GenerateAccessToken(ctx context.Context, req *credentialspb.GenerateAccessTokenRequest, opts ...gax.CallOption) (*credentialspb.GenerateAccessTokenResponse, error) {
 	return m.generateAccessTokenFn(ctx, req, opts...)
-}
-
-// containsString checks if s contains substr.
-func containsString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

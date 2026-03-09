@@ -32,6 +32,7 @@ type PersistedRun struct {
 	NetworkPolicy    string                   `json:"network_policy,omitempty"`
 	NetworkAllow     []string                 `json:"network_allow,omitempty"`
 	AWSConfig        *AWSConfig               `json:"aws_config,omitempty"`
+	GCPConfig        *GCPConfig               `json:"gcp_config,omitempty"`
 	TransformerSpecs []TransformerSpec        `json:"transformer_specs,omitempty"`
 }
 
@@ -77,6 +78,7 @@ func (p *RunPersister) Save() error {
 			NetworkPolicy:    rc.NetworkPolicy,
 			NetworkAllow:     rc.NetworkAllow,
 			AWSConfig:        rc.AWSConfig,
+			GCPConfig:        rc.GCPConfig,
 			TransformerSpecs: rc.TransformerSpecs,
 		}
 		rc.mu.RUnlock()
@@ -206,6 +208,7 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 		rc.NetworkPolicy = pr.NetworkPolicy
 		rc.NetworkAllow = pr.NetworkAllow
 		rc.AWSConfig = pr.AWSConfig
+		rc.GCPConfig = pr.GCPConfig
 		rc.TransformerSpecs = pr.TransformerSpecs
 
 		if err := resolveCredentials(rc, pr.Grants, pr.MCPServers, store); err != nil {
@@ -243,6 +246,23 @@ func RestoreRuns(ctx context.Context, registry *Registry, runs []PersistedRun) i
 			} else {
 				awsProvider.SetAuthToken(pr.AuthToken)
 				rc.SetAWSHandler(awsProvider.Handler())
+			}
+		}
+
+		// Set up GCP credential provider if configured.
+		if pr.GCPConfig != nil {
+			gcpProvider, gcpErr := proxy.NewGCPCredentialProvider(
+				runCtx,
+				pr.GCPConfig.ServiceAccount,
+				pr.GCPConfig.Project,
+				pr.GCPConfig.Lifetime,
+			)
+			if gcpErr != nil {
+				log.Warn("restore: failed to create GCP credential provider",
+					"run_id", pr.RunID, "error", gcpErr)
+			} else {
+				gcpProvider.SetAuthToken(pr.AuthToken)
+				rc.SetGCPHandler(gcpProvider.Handler())
 			}
 		}
 

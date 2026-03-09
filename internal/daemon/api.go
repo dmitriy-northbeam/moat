@@ -20,6 +20,8 @@
 package daemon
 
 import (
+	"time"
+
 	"github.com/majorcontext/moat/internal/config"
 )
 
@@ -59,6 +61,13 @@ type TransformerSpec struct {
 	Kind string `json:"kind"` // "oauth-endpoint-workaround" or "response-scrub"
 }
 
+// GCPConfig holds GCP credential provider configuration.
+type GCPConfig struct {
+	ServiceAccount string        `json:"service_account"`
+	Project        string        `json:"project,omitempty"`
+	Lifetime       time.Duration `json:"lifetime"`
+}
+
 // RegisterRequest is sent to POST /v1/runs.
 type RegisterRequest struct {
 	RunID                string                   `json:"run_id"`
@@ -72,6 +81,7 @@ type RegisterRequest struct {
 	NetworkAllow         []string                 `json:"network_allow,omitempty"`
 	Grants               []string                 `json:"grants,omitempty"`
 	AWSConfig            *AWSConfig               `json:"aws_config,omitempty"`
+	GCPConfig            *GCPConfig               `json:"gcp_config,omitempty"`
 	ResponseTransformers []TransformerSpec        `json:"response_transformers,omitempty"`
 }
 
@@ -126,6 +136,7 @@ func (req *RegisterRequest) ToRunContext() *RunContext {
 	rc.NetworkPolicy = req.NetworkPolicy
 	rc.NetworkAllow = req.NetworkAllow
 	rc.AWSConfig = req.AWSConfig
+	rc.GCPConfig = req.GCPConfig
 	rc.Grants = req.Grants
 	rc.TransformerSpecs = req.ResponseTransformers
 	return rc

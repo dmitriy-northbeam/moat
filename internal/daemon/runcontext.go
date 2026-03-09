@@ -59,6 +59,7 @@ type RunContext struct {
 	NetworkAllow  []string                 `json:"network_allow,omitempty"`
 
 	AWSConfig        *AWSConfig        `json:"aws_config,omitempty"`
+	GCPConfig        *GCPConfig        `json:"gcp_config,omitempty"`
 	TransformerSpecs []TransformerSpec `json:"transformer_specs,omitempty"`
 	Grants           []string          `json:"grants,omitempty"`
 
@@ -66,6 +67,7 @@ type RunContext struct {
 
 	refreshCancel context.CancelFunc `json:"-"` // cancels token refresh goroutine
 	awsHandler    http.Handler       `json:"-"` // AWS credential endpoint handler
+	gcpHandler    http.Handler       `json:"-"` // GCP credential endpoint handler
 	mu            sync.RWMutex
 }
 
@@ -113,6 +115,13 @@ func (rc *RunContext) SetAWSHandler(h http.Handler) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	rc.awsHandler = h
+}
+
+// SetGCPHandler stores the GCP credential endpoint handler for this run.
+func (rc *RunContext) SetGCPHandler(h http.Handler) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.gcpHandler = h
 }
 
 // SetCredential implements credential.ProxyConfigurer.
@@ -308,6 +317,9 @@ func (rc *RunContext) ToProxyContextData() *proxy.RunContextData {
 
 	// Include AWS handler if configured.
 	d.AWSHandler = rc.awsHandler
+
+	// Include GCP handler if configured.
+	d.GCPHandler = rc.gcpHandler
 
 	return d
 }

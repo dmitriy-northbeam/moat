@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/moat/internal/credential"
 	"github.com/majorcontext/moat/internal/provider"
 	"github.com/majorcontext/moat/internal/providers/aws"
+	"github.com/majorcontext/moat/internal/providers/gcp"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -22,6 +23,13 @@ var (
 	awsRegion          string
 	awsSessionDuration string
 	awsExternalID      string
+)
+
+// GCP grant flags - these need to be passed to the GCP provider
+var (
+	gcpServiceAccount string
+	gcpProject        string
+	gcpLifetime       string
 )
 
 var grantCmd = &cobra.Command{
@@ -61,6 +69,9 @@ func init() {
 	grantCmd.Flags().StringVar(&awsRegion, "region", "", "AWS region (default: us-east-1)")
 	grantCmd.Flags().StringVar(&awsSessionDuration, "session-duration", "", "Session duration (default: 15m, max: 12h)")
 	grantCmd.Flags().StringVar(&awsExternalID, "external-id", "", "External ID for role assumption")
+	grantCmd.Flags().StringVar(&gcpServiceAccount, "service-account", "", "GCP service account email (required for gcp)")
+	grantCmd.Flags().StringVar(&gcpProject, "project", "", "GCP project ID")
+	grantCmd.Flags().StringVar(&gcpLifetime, "lifetime", "", "Access token lifetime (default: 1h, max: 12h)")
 }
 
 // saveCredential stores a credential and returns the file path.
@@ -114,6 +125,18 @@ Options:
   --external-id      External ID for role assumption`)
 	}
 
+	// For GCP, validate required flags before calling Grant
+	if providerName == "gcp" && gcpServiceAccount == "" {
+		return fmt.Errorf(`--service-account is required for GCP grant
+
+Usage: moat grant gcp --service-account=NAME@PROJECT.iam.gserviceaccount.com
+
+Options:
+  --service-account  GCP service account email (required)
+  --project          GCP project ID (default: extracted from email)
+  --lifetime         Access token lifetime (default: 1h, max: 12h)`)
+	}
+
 	// Call the provider's Grant method
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -123,6 +146,11 @@ Options:
 	// For AWS, pass the CLI flags via context
 	if providerName == "aws" {
 		ctx = aws.WithGrantOptions(ctx, awsRole, awsRegion, awsSessionDuration, awsExternalID)
+	}
+
+	// For GCP, pass the CLI flags via context
+	if providerName == "gcp" {
+		ctx = gcp.WithGrantOptions(ctx, gcpServiceAccount, gcpProject, gcpLifetime)
 	}
 
 	provCred, err := prov.Grant(ctx)

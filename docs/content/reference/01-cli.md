@@ -476,6 +476,7 @@ moat grant <provider>[:<scopes>]
 | `gemini` | Google Gemini (Gemini CLI OAuth or API key) |
 | `npm` | npm registries (.npmrc, `NPM_TOKEN`, or manual) |
 | `aws` | AWS (IAM role assumption) |
+| `gcp` | GCP (service account impersonation) |
 
 ### moat grant github
 
@@ -629,6 +630,39 @@ moat grant aws \
     --role arn:aws:iam::123456789012:role/AgentRole \
     --region eu-west-1 \
     --session-duration 30m
+```
+
+### moat grant gcp
+
+Grant GCP credentials via service account impersonation.
+
+```
+moat grant gcp --service-account=<EMAIL> [flags]
+```
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--service-account EMAIL` | GCP service account email (required) | -- |
+| `--project PROJECT` | GCP project ID | Extracted from email |
+| `--lifetime DURATION` | Access token lifetime (e.g., `1h`, `2h`) | `1h` |
+
+**Prerequisites:**
+- GCP credentials configured (`gcloud auth application-default login`)
+- `roles/iam.serviceAccountTokenCreator` on the target service account
+
+### Examples
+
+```bash
+# Basic service account impersonation
+moat grant gcp --service-account agent@my-project.iam.gserviceaccount.com
+
+# With explicit project
+moat grant gcp --service-account agent@my-project.iam.gserviceaccount.com --project my-project
+
+# With custom token lifetime
+moat grant gcp --service-account agent@my-project.iam.gserviceaccount.com --lifetime 2h
 ```
 
 ### moat grant list

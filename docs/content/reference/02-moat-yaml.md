@@ -345,6 +345,8 @@ grants:
   - github
   - anthropic
   - openai
+  - aws
+  - gcp
   - ssh:github.com
 ```
 
@@ -360,6 +362,8 @@ grants:
 | `anthropic` | Anthropic API |
 | `openai` | OpenAI API |
 | `gemini` | Google Gemini API |
+| `aws` | AWS IAM role assumption |
+| `gcp` | GCP service account impersonation |
 | `npm` | npm registries |
 | `ssh:HOSTNAME` | SSH access to specific host |
 

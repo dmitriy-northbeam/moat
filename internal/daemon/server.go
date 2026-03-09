@@ -177,6 +177,22 @@ func (s *Server) handleRegisterRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.GCPConfig != nil {
+		gcpProvider, gcpErr := proxy.NewGCPCredentialProvider(
+			runCtx,
+			req.GCPConfig.ServiceAccount,
+			req.GCPConfig.Project,
+			req.GCPConfig.Lifetime,
+		)
+		if gcpErr != nil {
+			log.Warn("failed to create GCP credential provider for run",
+				"run_id", rc.RunID, "error", gcpErr)
+		} else {
+			gcpProvider.SetAuthToken(token)
+			rc.SetGCPHandler(gcpProvider.Handler())
+		}
+	}
+
 	if s.persister != nil {
 		s.persister.SaveDebounced()
 	}

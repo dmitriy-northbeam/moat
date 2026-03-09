@@ -239,6 +239,7 @@ type RunContextData struct {
 	Policy               string
 	AllowedHosts         []hostPattern
 	AWSHandler           http.Handler
+	GCPHandler           http.Handler
 	CredStore            credential.Store
 }
 
@@ -276,6 +277,7 @@ type Proxy struct {
 	policy               string        // "permissive" or "strict"
 	allowedHosts         []hostPattern // parsed allow patterns for strict policy
 	awsHandler           http.Handler  // Optional handler for AWS credential endpoint
+	gcpHandler           http.Handler  // Optional handler for GCP credential endpoint
 	credStore            credential.Store
 	mcpServers           []config.MCPServerConfig
 	removeHeaders        map[string][]string           // host -> []headerName
@@ -314,6 +316,11 @@ func (p *Proxy) SetLogger(logger RequestLogger) {
 // SetAWSHandler sets the handler for AWS credential requests.
 func (p *Proxy) SetAWSHandler(h http.Handler) {
 	p.awsHandler = h
+}
+
+// SetGCPHandler sets the handler for GCP credential requests.
+func (p *Proxy) SetGCPHandler(h http.Handler) {
+	p.gcpHandler = h
 }
 
 // SetMCPServers configures MCP servers for credential injection.
@@ -724,6 +731,43 @@ func (p *Proxy) getAWSHandlerForRequest(r *http.Request) http.Handler {
 	return p.awsHandler
 }
 
+// getGCPHandlerForRequest returns the GCP handler from RunContextData
+// or falls back to the proxy's own handler.
+func (p *Proxy) getGCPHandlerForRequest(r *http.Request) http.Handler {
+	if rc := getRunContext(r); rc != nil && rc.GCPHandler != nil {
+		return rc.GCPHandler
+	}
+	return p.gcpHandler
+}
+
+// handleDirectGCPCredentials handles GCP credential endpoint requests that arrive
+// directly from containers. The credential helper sends Authorization: Bearer {token}
+// where token is the run's proxy auth token. We extract it to resolve run context,
+// then dispatch to the per-run GCP handler.
+func (p *Proxy) handleDirectGCPCredentials(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		http.Error(w, "Authorization required", http.StatusUnauthorized)
+		return
+	}
+	token := auth[7:]
+
+	rc, found := p.contextResolver(token)
+	if !found {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	if rc.GCPHandler == nil {
+		http.Error(w, "GCP credentials not configured for this run", http.StatusNotFound)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), runContextKey, rc)
+	r = r.WithContext(ctx)
+	rc.GCPHandler.ServeHTTP(w, r)
+}
+
 // handleDirectMCPRelay handles MCP relay requests that arrive directly (not through proxy).
 // URL format: /mcp/{token}/{server-name}[/path]
 // Extracts the auth token from the URL, resolves run context, rewrites the path
@@ -813,6 +857,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Direct GCP credential endpoint requests from containers.
+	// Same pattern as AWS: credential helper sends Authorization: Bearer {token}.
+	if p.contextResolver != nil && r.URL.Host == "" && strings.HasPrefix(r.URL.Path, "/_gcp/") {
+		p.handleDirectGCPCredentials(w, r)
+		return
+	}
+
 	// Authentication and context resolution.
 	// When a contextResolver is set (daemon mode), extract the proxy auth token,
 	// resolve it to per-run context data, and store it in the request context.
@@ -838,6 +889,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Handle AWS credential endpoint
 	if awsH := p.getAWSHandlerForRequest(r); awsH != nil && strings.HasPrefix(r.URL.Path, "/_aws/credentials") {
 		awsH.ServeHTTP(w, r)
+		return
+	}
+
+	// Handle GCP credential endpoint
+	if gcpH := p.getGCPHandlerForRequest(r); gcpH != nil && strings.HasPrefix(r.URL.Path, "/_gcp/credentials") {
+		gcpH.ServeHTTP(w, r)
 		return
 	}
 

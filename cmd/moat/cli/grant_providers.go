@@ -33,6 +33,7 @@ var goProviderDescriptions = map[string]string{
 	"codex":    "OpenAI API key or OAuth credentials",
 	"gemini":   "Gemini API key or OAuth credentials",
 	"aws":      "AWS IAM role assumption",
+	"gcp":      "GCP service account impersonation",
 	"npm":      "npm registry credentials",
 	"graphite": "Graphite API token for stacked PRs",
 }

@@ -37,6 +37,7 @@ import (
 	_ "github.com/majorcontext/moat/internal/providers" // register all credential providers
 	awsprov "github.com/majorcontext/moat/internal/providers/aws"
 	"github.com/majorcontext/moat/internal/providers/claude" // only for settings types (LoadAllSettings, Settings, MarketplaceConfig) - provider setup uses provider interfaces
+	gcpprov "github.com/majorcontext/moat/internal/providers/gcp"
 	"github.com/majorcontext/moat/internal/proxy"
 	"github.com/majorcontext/moat/internal/routing"
 	"github.com/majorcontext/moat/internal/runctx"
@@ -602,36 +603,64 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Run, error) {
 					anthropicCred = provCred
 				}
 
-				// Handle AWS endpoint provider
+				// Handle endpoint providers (AWS, GCP)
 				if ep := provider.GetEndpoint(string(credName)); ep != nil {
-					// AWS credentials are handled via credential endpoint
-					// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
-					awsCfg, err := awsprov.ConfigFromCredential(provCred)
-					if err != nil {
-						return nil, fmt.Errorf("parsing AWS credential: %w", err)
-					}
+					if string(credName) == "gcp" {
+						// GCP credentials are handled via credential endpoint
+						gcpCfg, err := gcpprov.ConfigFromCredential(provCred)
+						if err != nil {
+							return nil, fmt.Errorf("parsing GCP credential: %w", err)
+						}
 
-					awsProvider, err := proxy.NewAWSCredentialProvider(
-						ctx,
-						awsCfg.RoleARN,
-						awsCfg.Region,
-						awsCfg.SessionDuration,
-						awsCfg.ExternalID,
-						"moat-"+r.ID,
-					)
-					if err != nil {
-						return nil, fmt.Errorf("creating AWS credential provider: %w", err)
-					}
-					// Store provider for later AWS credential_process setup
-					r.AWSCredentialProvider = awsProvider
+						gcpProvider, err := proxy.NewGCPCredentialProvider(
+							ctx,
+							gcpCfg.ServiceAccount,
+							gcpCfg.Project,
+							gcpCfg.Lifetime,
+						)
+						if err != nil {
+							return nil, fmt.Errorf("creating GCP credential provider: %w", err)
+						}
+						// Store provider for later GCP credential setup
+						r.GCPCredentialProvider = gcpProvider
 
-					// Store config for daemon registration so the daemon can
-					// create its own AWSCredentialProvider.
-					runCtx.AWSConfig = &daemon.AWSConfig{
-						RoleARN:         awsCfg.RoleARN,
-						Region:          awsCfg.Region,
-						SessionDuration: awsCfg.SessionDuration,
-						ExternalID:      awsCfg.ExternalID,
+						// Store config for daemon registration so the daemon can
+						// create its own GCPCredentialProvider.
+						runCtx.GCPConfig = &daemon.GCPConfig{
+							ServiceAccount: gcpCfg.ServiceAccount,
+							Project:        gcpCfg.Project,
+							Lifetime:       gcpCfg.Lifetime,
+						}
+					} else {
+						// AWS credentials are handled via credential endpoint
+						// Parse stored config from Metadata (new format) with fallback to Scopes (legacy)
+						awsCfg, err := awsprov.ConfigFromCredential(provCred)
+						if err != nil {
+							return nil, fmt.Errorf("parsing AWS credential: %w", err)
+						}
+
+						awsProvider, err := proxy.NewAWSCredentialProvider(
+							ctx,
+							awsCfg.RoleARN,
+							awsCfg.Region,
+							awsCfg.SessionDuration,
+							awsCfg.ExternalID,
+							"moat-"+r.ID,
+						)
+						if err != nil {
+							return nil, fmt.Errorf("creating AWS credential provider: %w", err)
+						}
+						// Store provider for later AWS credential_process setup
+						r.AWSCredentialProvider = awsProvider
+
+						// Store config for daemon registration so the daemon can
+						// create its own AWSCredentialProvider.
+						runCtx.AWSConfig = &daemon.AWSConfig{
+							RoleARN:         awsCfg.RoleARN,
+							Region:          awsCfg.Region,
+							SessionDuration: awsCfg.SessionDuration,
+							ExternalID:      awsCfg.ExternalID,
+						}
 					}
 				}
 			}
@@ -822,6 +851,76 @@ region = %s
 
 			fmt.Printf("AWS credential_process configured (role: %s)\n",
 				filepath.Base(r.AWSCredentialProvider.RoleARN()))
+		}
+
+		// Set up GCP external credential config if GCP grant is active
+		// Uses executable-sourced credentials so the GCP SDK invokes our helper
+		// to fetch access tokens from the proxy on demand.
+		if r.GCPCredentialProvider != nil {
+			// Create temp directory for credential helper and config
+			gcpDir, err := os.MkdirTemp("", "agentops-gcp-*")
+			if err != nil {
+				cleanupDaemonRun()
+				return nil, fmt.Errorf("creating GCP credential helper directory: %w", err)
+			}
+			r.gcpTempDir = gcpDir // Track for cleanup
+
+			// Write the credential helper script
+			helperPath := filepath.Join(gcpDir, "credential-helper")
+			if err := os.WriteFile(helperPath, gcpprov.GetCredentialHelper(), 0700); err != nil {
+				cleanupDaemonRun()
+				return nil, fmt.Errorf("writing GCP credential helper: %w", err)
+			}
+
+			// Write external credential config
+			credConfigData, err := gcpprov.ExternalCredentialConfig("/agentops/gcp/credential-helper")
+			if err != nil {
+				cleanupDaemonRun()
+				return nil, fmt.Errorf("generating GCP external credential config: %w", err)
+			}
+			credConfigPath := filepath.Join(gcpDir, "credentials.json")
+			if err := os.WriteFile(credConfigPath, credConfigData, 0644); err != nil {
+				cleanupDaemonRun()
+				return nil, fmt.Errorf("writing GCP credential config: %w", err)
+			}
+
+			// Mount the directory
+			mounts = append(mounts, container.MountConfig{
+				Source:   gcpDir,
+				Target:   "/agentops/gcp",
+				ReadOnly: true,
+			})
+
+			// Build credential endpoint URL
+			gcpCredentialURL := "http://" + proxyHost + "/_gcp/credentials"
+
+			// Set environment variables
+			proxyEnv = append(proxyEnv,
+				"GOOGLE_APPLICATION_CREDENTIALS=/agentops/gcp/credentials.json",
+				// Required for GCP SDK to allow executable-sourced credentials.
+				"GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1",
+				"AGENTOPS_GCP_CREDENTIAL_URL="+gcpCredentialURL,
+				// GCP traffic goes through proxy for firewall/observability.
+				// Tell common HTTP libraries to trust our CA for MITM SSL.
+				"REQUESTS_CA_BUNDLE="+caCertInContainer,
+				"CURL_CA_BUNDLE="+caCertInContainer,
+			)
+
+			// Set project environment variables if configured
+			if r.GCPCredentialProvider.Project() != "" {
+				proxyEnv = append(proxyEnv,
+					"CLOUDSDK_CORE_PROJECT="+r.GCPCredentialProvider.Project(),
+					"GCLOUD_PROJECT="+r.GCPCredentialProvider.Project(),
+				)
+			}
+
+			// Include auth token if proxy requires it
+			if regResp.AuthToken != "" {
+				proxyEnv = append(proxyEnv, "AGENTOPS_CREDENTIAL_TOKEN="+regResp.AuthToken)
+			}
+
+			fmt.Printf("GCP credentials configured (service account: %s)\n",
+				r.GCPCredentialProvider.ServiceAccount())
 		}
 	}
 
@@ -2790,7 +2889,7 @@ func (m *Manager) cleanupResources(ctx context.Context, r *Run) {
 		}
 
 		// Clean up temp directories
-		for _, dir := range []string{r.awsTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir} {
+		for _, dir := range []string{r.awsTempDir, r.gcpTempDir, r.ClaudeConfigTempDir, r.CodexConfigTempDir, r.GeminiConfigTempDir} {
 			if dir != "" {
 				if err := os.RemoveAll(dir); err != nil {
 					log.Debug("cleanup: failed to remove temp dir", "path", dir, "error", err)
@@ -3240,6 +3339,7 @@ func buildRegisterRequest(rc *daemon.RunContext, grants []string) daemon.Registe
 		MCPServers:    rc.MCPServers,
 		Grants:        grants,
 		AWSConfig:     rc.AWSConfig,
+		GCPConfig:     rc.GCPConfig,
 	}
 
 	for host, cred := range rc.Credentials {
